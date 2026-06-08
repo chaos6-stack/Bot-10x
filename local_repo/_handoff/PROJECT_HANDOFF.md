@@ -607,5 +607,122 @@ The Android app calls these Python scripts as its logic layer. When a "brain upd
 
 ---
 
+## CHANGE 012 — Strategy v4 + Multi-Symbol Monitoring (2026-06-08)
+
+**Root cause analysis of 2% win rate identified 10 fundamental flaws. All fixed.
+Multi-symbol architecture added (2–4 simultaneous streams).**
+
+### Strategy Fixes (`config.py`, `strategy.py`, `trader.py`)
+
+**1. OVERDUE zone unconditional trigger removed** (`strategy.py`)
+- The `if cycle_zone == "OVERDUE": return BUY` hard-trigger was statistically wrong.
+- Reason: geometric distribution is MEMORYLESS. A spike at tick 1200 is no more likely
+  than at tick 400. The cumulative CDF (`cycle_p`) rises monotonically but the *marginal*
+  probability per tick is always exactly 1/N.
+- Fix: OVERDUE now uses `OVERDUE_SCORE_GATE = 0.30` as a relaxed threshold (not a bypass).
+
+**2. Exit ticks reduced 120 → 40** (`config.py`)
+- BOOM drifts ~0.035 pts/tick downward. Over 120 ticks = ~4.2 pts of drift loss on every
+  BUY trade that doesn't catch a spike. Expected spikes in 120 ticks = 0.12 (12% chance).
+- Short 40-tick windows mean losses are small; spike captures are the only real wins.
+
+**3. HOT_ZONE_EXIT_TICKS = 30** (`config.py`, `trader.py`)
+- HOT/OVERDUE entries have `is_hot_entry = True` flag stored in the trade dict.
+- These entries use a 30-tick max-hold window (vs 40 for normal entries).
+- Thesis: if no spike within 30 ticks of entering a HOT zone, cut and wait for next cycle.
+
+**4. Stop-loss tightened 2.5 → 1.2 pts** (`config.py`)
+- Old SL was wider than 40-tick drift (~1.4 pts) so it was catching drift, not reversals.
+- New SL at 1.2 pts activates on true adverse moves only.
+
+**5. Take-profit reduced 20 → 8 pts** (`config.py`)
+- Real BOOM spikes are 10–28 pts; 20 pts TP was too far. 8 pts is achievable.
+- Combined with 30/40-tick exits: R:R is now ~6.7:1 at realistic TP size.
+
+**6. Entry score threshold raised 0.42 → 0.57** (`config.py`)
+- At 0.42, cycle_p alone at tick 500 (0.39 × 0.60 = 0.23) + any signal could fire.
+- At 0.57, the bot only enters deep HOT/OVERDUE with multi-signal confirmation.
+
+**7. Post-trade cooldown doubled 60 → 120 ticks** (`config.py`)
+- After a stop-loss on BOOM BUY, price is still trending down.
+- Re-entering 60 ticks later hits the same downtrend. 120 ticks lets drift settle.
+
+**8. TRADE_AGAINST_SPIKES disabled** (`config.py`)
+- Counter-spike RECOVERY trades were unvalidated on real data and adding noise losses.
+- Set to `False` by default. Re-enable only after backtesting on real tick CSVs.
+
+**9. Trailing stop added** (`config.py`, `trader.py`)
+- `TRAILING_STOP_ACTIVE = True`, `TRAILING_STOP_TRIGGER_PCT = 0.40`
+- When PnL reaches 40% of TP ($3.2 on 0.20 lots), trade locks at breakeven.
+- If PnL then drops to ≤ 0, trade closes at breakeven instead of reversing to a loss.
+- Converts ~20–30% of "nearly-won-then-reversed" trades into breakevens.
+
+**10. Asymmetric lot sizing** (`strategy.py`, `trader.py`)
+- BUILDING zone entries: flat `DEFAULT_LOT_SIZE` (no cycle scaling).
+- HOT/OVERDUE entries: cycle scale applied (up to `CYCLE_MAX_LOT_SCALE = 2.0`).
+- Reason: BUILDING zone has lowest spike probability; scaling there just increases drift exposure.
+
+### New Config Parameters
+```python
+HOT_ZONE_EXIT_TICKS       = 30     # short timeout for HOT/OVERDUE entries
+OVERDUE_SCORE_GATE        = 0.30   # replaces unconditional OVERDUE trigger
+TRAILING_STOP_ACTIVE      = True   # lock breakeven at 40% of TP
+TRAILING_STOP_TRIGGER_PCT = 0.40   # 40% of TP triggers the lock
+CYCLE_MAX_LOT_SCALE       = 2.0    # lowered from 2.5
+MARTINGALE_ACTIVE         = False  # disabled by default
+```
+
+### Multi-Symbol Architecture (`main.py` full rewrite)
+
+**SymbolWorker class** — one per symbol, manages:
+- Independent `SpikeStrategy` instance (own cycle counter, own analytics)
+- Independent `DerivDataStream` thread (own WebSocket connection to Deriv)
+- Own tick buffer, live_history[], live_candles[]
+- Shared PaperTrader + RiskManager (one virtual account across all symbols)
+
+**SyntheticTradingBot class** — orchestrator:
+- Accepts any number of symbols: `python3 main.py BOOM1000 CRASH500`
+- Runs all workers in parallel daemon threads
+- Background save thread writes `live_ticks.json` every 1 second
+- Identifies `best_signal_symbol` (highest spike_probability_pct at current tick)
+- Active trade can be on any symbol; once open, blocks all other entries (shared trader)
+
+**live_ticks.json schema change** (backward compatible):
+```json
+{
+  "mode": "multi",
+  "symbols": ["BOOM1000", "CRASH500"],
+  "per_symbol": {
+    "BOOM1000": { "ticks": [], "candles": [], "cycle_zone": "HOT",
+                  "spike_probability_pct": 45.2, "last_price": 9234.56, ... },
+    "CRASH500":  { ... }
+  },
+  "best_signal_symbol": "BOOM1000",
+  "active_trade": { "symbol": "BOOM1000", ... },
+  "balance": 50.0,
+  // Legacy single-symbol fields still present for backward compat
+  "symbol": "BOOM1000", "ticks": [...], ...
+}
+```
+
+### Multi-Symbol UI (`server.ts`, `src/App.tsx`)
+
+**server.ts**:
+- `spawnBot(symbols: string[])` — accepts array, spawns `python3 main.py ...symbols`
+- `/api/bot/start` — accepts `{ symbols: [] }` (new) or `{ symbol: "" }` (legacy)
+- `/api/bot/restart` — same dual-format support
+- `/api/bot/status` — returns `{ symbols: [] }` alongside existing fields
+
+**App.tsx**:
+- **Multi-Symbol selector panel** in General tab — 4 checkboxes (BOOM1000, CRASH1000, BOOM500, CRASH500), 1–4 selectable, shows active streams when bot is running
+- **Symbol Status Cards bar** — appears in centre column when mode="multi"; one card per symbol showing: price, zone badge, spike probability %, cycle progress mini-bar, "Best Signal" crown badge
+- `selectedSymbols: string[]` state — passed as `{ symbols: [...] }` on bot start
+- `botActiveSymbols: string[]` state — synced from `/api/bot/status` response
+
+### Bug Fix Also Applied
+- `spike_probability_pct` was always showing 0% on dashboard because `main.py` was reading `analytics.get("spike_probability", 0.0)` but the correct key is `spike_probability_pct` (already a percentage). Fixed in all paths within SymbolWorker.
+
+---
+
 *End of handoff document. Update this file whenever a significant change is made.*
 

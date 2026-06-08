@@ -45,7 +45,7 @@ async function startServer() {
   let botProcess: ChildProcess | null = null;
   let botOutput = "";
   let botStatus = "idle";
-  let botSymbol = "BOOM1000";
+  let botSymbols: string[] = ["BOOM1000"];
 
   // ──────────────────────────────────────────────────────────────────────────
   //  CONFIG HELPERS
@@ -290,13 +290,19 @@ async function startServer() {
   //  LIVE BOT PROCESS MANAGER
   // ──────────────────────────────────────────────────────────────────────────
 
-  function spawnBot(symbol?: string) {
-    const sym = symbol || parseConfig().ACTIVE_SYMBOL || "BOOM1000";
-    botSymbol = sym;
-    botOutput = `Powering up trading agent for ${sym}...\n`;
+  function spawnBot(symbols?: string | string[]) {
+    // Accept string (legacy), string[] (multi), or fall back to config
+    if (!symbols) {
+      const cfg = parseConfig();
+      symbols = [cfg.ACTIVE_SYMBOL || "BOOM1000"];
+    } else if (typeof symbols === "string") {
+      symbols = [symbols];
+    }
+    botSymbols = symbols;
+    botOutput = `Powering up agent for ${symbols.join(" + ")}...\n`;
     botStatus = "running";
 
-    botProcess = spawn("python3", ["main.py", sym], {
+    botProcess = spawn("python3", ["main.py", ...symbols], {
       cwd: localRepoPath,
       env: { ...process.env },
     });
@@ -320,13 +326,14 @@ async function startServer() {
   app.post("/api/bot/start", (req, res) => {
     if (botStatus === "running")
       return res.status(400).json({ error: "Bot is already running" });
-    const symbol = req.body.symbol;
-    spawnBot(symbol);
-    res.json({ status: "started", symbol: botSymbol });
+    // Accept { symbol } (legacy) or { symbols: [] } (multi)
+    const symbols: string[] = req.body.symbols || (req.body.symbol ? [req.body.symbol] : undefined);
+    spawnBot(symbols);
+    res.json({ status: "started", symbols: botSymbols, symbol: botSymbols[0] });
   });
 
   app.get("/api/bot/status", (req, res) => {
-    res.json({ status: botStatus, output: botOutput, symbol: botSymbol });
+    res.json({ status: botStatus, output: botOutput, symbols: botSymbols, symbol: botSymbols[0] });
   });
 
   app.post("/api/bot/stop", (req, res) => {
@@ -339,18 +346,13 @@ async function startServer() {
     } else { res.status(400).json({ error: "No active bot" }); }
   });
 
-  // Restart bot with a new symbol — used by symbol switcher
+  // Restart bot — accepts { symbol } OR { symbols: [] }
   app.post("/api/bot/restart", (req, res) => {
-    const symbol = req.body.symbol;
-    if (botProcess) {
-      botProcess.kill();
-      botProcess = null;
-    }
-    // Small delay to let process die cleanly
-    setTimeout(() => {
-      spawnBot(symbol);
-    }, 800);
-    res.json({ status: "restarting", symbol: symbol || parseConfig().ACTIVE_SYMBOL });
+    const symbols: string[] = req.body.symbols || (req.body.symbol ? [req.body.symbol] : undefined);
+    if (botProcess) { botProcess.kill(); botProcess = null; }
+    setTimeout(() => { spawnBot(symbols); }, 800);
+    const upcoming = symbols || botSymbols;
+    res.json({ status: "restarting", symbols: upcoming, symbol: upcoming[0] });
   });
 
   // ──────────────────────────────────────────────────────────────────────────

@@ -1,12 +1,25 @@
 # main.py
 """
-Synthetic Indices Trading Agent - Main Orchestrator
-Binds real-time stream ticks, runs indicators, triggers strategies,
-enforces risk controls, and executes virtual paper trades.
+Synthetic Indices Trading Agent — Main Orchestrator v4
+Multi-symbol support: pass any number of symbols as CLI args.
+  python3 main.py                          → single BOOM1000
+  python3 main.py CRASH500                 → single CRASH500
+  python3 main.py BOOM1000 CRASH1000       → 2-symbol simultaneous
+  python3 main.py BOOM1000 CRASH500 BOOM500 CRASH1000  → 4-symbol
+
+Each symbol runs its own independent SpikeStrategy + DerivDataStream on
+a daemon thread. All symbols share ONE PaperTrader + RiskManager (one
+virtual account, one active trade at a time across all symbols).
+
+The symbol with the highest spike_probability_pct at each tick is marked
+as `best_signal_symbol` in live_ticks.json. Trades can fire on any symbol.
 """
 
 import sys
+import os
+import json
 import time
+import threading
 from logger import TradeLogger
 from risk_manager import RiskManager
 from trader import PaperTrader
@@ -15,193 +28,272 @@ from data_stream import DerivDataStream
 import config
 
 
-class SyntheticTradingBot:
-    def __init__(self, symbol: str = None):
-        self.symbol       = (symbol or config.ACTIVE_SYMBOL).upper()
-        self.logger       = TradeLogger()
-        self.risk_manager = RiskManager(self.logger)
-        self.trader       = PaperTrader(self.logger, self.risk_manager)
-        self.strategy     = SpikeStrategy(self.symbol)
-        self.stream       = None
+# ─────────────────────────────────────────────────────────────────────────────
+#  PER-SYMBOL WORKER
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SymbolWorker:
+    """
+    Manages all per-symbol state: stream, strategy, tick buffer, history.
+    Receives the shared trader/logger so trades and balance are consolidated.
+    """
+
+    def __init__(self, symbol: str, shared_trader: PaperTrader,
+                 shared_logger: TradeLogger):
+        self.symbol  = symbol.upper()
+        self.trader  = shared_trader
+        self.logger  = shared_logger
+        self.strategy = SpikeStrategy(self.symbol)
+        self.stream   = None
+
         self.tick_buffer  = []
         self.tick_counter = 0
+        self.live_history = []
+        self.live_candles = []
+        self.latest_analytics: dict  = {}
+        self.latest_price:    float  = 0.0
+        self.is_fallback:     bool   = False
 
-    def print_banner(self):
-        banner = f"""
-============================================================
-   █▀▀ █▄█ █▄░█ ▀█▀ █░█ █▀▀ ▀█▀ █ █▀▀ █▀█ █▀█ ▀█▀
-   ▄██ ░█░ █░▀█ ░█░ █▀█ ██▄ ░█░ █ █▄▄ █▀▄ █▄█ ░█░
-       AI-ASSISTED SYNTHETIC INDICES TRADING AGENT
-============================================================
-  Symbol  : {self.symbol}          Virt Balance : ${self.trader.balance:.2f}
-  Risk    : Max Daily Loss ${config.MAX_DAILY_LOSS:.0f}  Drawdown cap {config.MAX_DRAWDOWN_PCT*100:.0f}%
-  Cycle   : {config.SPIKE_CYCLE_LENGTH} ticks   Lot Scaling  : {'ON' if config.CYCLE_LOT_SCALING else 'OFF'} (max {config.CYCLE_MAX_LOT_SCALE}x)
-  SL/TP   : {config.STOP_LOSS_POINTS} pts / {config.TAKE_PROFIT_POINTS} pts   Exit Ticks   : {config.BOOM_EXIT_TICKS}
-============================================================
-[SYSTEM] Starting state engines. Press Ctrl+C to stop...
-"""
-        print(banner)
+    # ── Tick handler (called by stream thread) ────────────────────────────────
 
     def handle_tick(self, price: float, timestamp: int):
-        """Callback executed on every incoming tick from the stream."""
         self.tick_counter += 1
+        self.latest_price  = price
         self.tick_buffer.append(price)
 
-        # Rolling buffer — keep 2× window size for indicator accuracy
         if len(self.tick_buffer) > config.TICK_WINDOW_SIZE * 2:
             self.tick_buffer.pop(0)
 
-        # Warm-up period
         if self.tick_counter <= config.TICK_WINDOW_SIZE:
             if self.tick_counter % 5 == 0:
-                print(
-                    f"[SYSTEM] Warming up indicators... "
-                    f"({self.tick_counter}/{config.TICK_WINDOW_SIZE})"
-                )
-            self._save_live_tick(price, timestamp, {})
+                print(f"[{self.symbol}] Warming up... ({self.tick_counter}/{config.TICK_WINDOW_SIZE})")
+            self._record_tick(price, timestamp, {})
             return
 
         if len(self.tick_buffer) < config.TICK_WINDOW_SIZE:
-            self._save_live_tick(price, timestamp, {})
+            self._record_tick(price, timestamp, {})
             return
 
-        # Run strategy
         decision, analytics = self.strategy.analyze_ticks(self.tick_buffer)
+        self.latest_analytics = analytics
 
-        # ── Console diagnostic every 5 ticks ─────────────────────────────
+        if self.stream is not None:
+            self.is_fallback = self.stream.use_fallback
+
+        # Console diagnostic every 5 ticks
         if self.tick_counter % 5 == 0:
-            zone        = analytics.get("cycle_zone", "?")
-            ticks_spike = analytics.get("ticks_since_spike", 0)
-            cycle_pct   = analytics.get("cycle_position", 0) * 100
-            lot_scale   = analytics.get("cycle_lot_scale", 1.0)
-            mult        = analytics.get("cycle_multiplier", 1.0)
-
-            if self.trader.active_trade:
+            zone      = analytics.get("cycle_zone", "?")
+            ts        = analytics.get("ticks_since_spike", 0)
+            cp        = analytics.get("cycle_position", 0) * 100
+            score_pct = analytics.get("spike_probability_pct", 0.0)
+            pos_str   = "NONE"
+            if self.trader.active_trade and self.trader.active_trade["symbol"] == self.symbol:
                 t = self.trader.active_trade
                 pos_str = (
                     f"{t['direction']} x{t['lot_size']} "
                     f"(held {t['ticks_held']}tk @ {t['entry_price']:.3f})"
                 )
-            else:
-                pos_str = "NONE"
-
             print(
-                f"[#{self.tick_counter:>5}] "
+                f"[{self.symbol}][#{self.tick_counter:>5}] "
                 f"Price: {price:.3f}  "
-                f"RSI: {analytics.get('rsi', 0):.1f}  "
-                f"Sqz: {analytics.get('compression_ratio', 1):.2f}  "
-                f"Cycle: {ticks_spike}tk/{cycle_pct:.0f}% [{zone}] {mult:.2f}x"
-                + (f" lots:{lot_scale:.2f}" if lot_scale != 1.0 else "")
-                + f"  Pos: {pos_str}"
+                f"Score: {score_pct:.1f}%  "
+                f"Cycle: {ts}tk/{cp:.0f}% [{zone}]  "
+                f"Pos: {pos_str}"
             )
 
-        # ── Execute trade decision ────────────────────────────────────────
         self.trader.evaluate_decision(decision, price, analytics)
-        self._save_live_tick(price, timestamp, analytics)
+        self._record_tick(price, timestamp, analytics)
 
-    def _save_live_tick(self, price: float, timestamp: int, analytics: dict):
-        import os
-        import json
+    def handle_candles(self, raw_candles):
+        """Seeds historical 1M candle buffer from stream."""
+        import random
+        self.live_candles = []
+        for c in raw_candles:
+            ts   = c["epoch"]
+            rsi  = 50.0
+            if self.live_candles:
+                rsi = self.live_candles[-1]["rsi_close"] + random.uniform(-2, 2)
+                rsi = max(15.0, min(85.0, rsi))
+            price_change = (c["high"] - c["open"]) if "BOOM" in self.symbol \
+                           else (c["open"] - c["low"])
+            is_spike = price_change > 12.0
+            self.live_candles.append({
+                "timestamp": ts,
+                "open":  c["open"], "high":  c["high"],
+                "low":   c["low"],  "close": c["close"],
+                "rsi_open": rsi, "rsi_high": rsi,
+                "rsi_low": rsi, "rsi_close": rsi,
+                "is_spike": is_spike,
+                "cycle_zone": "RECOVERY" if is_spike else "NORMAL"
+            })
 
-        # Build tick record
+    def _record_tick(self, price: float, timestamp: int, analytics: dict):
         record = {
-            "price": price,
-            "timestamp": timestamp,
-            "rsi": analytics.get("rsi", 50.0),
+            "price":             price,
+            "timestamp":         timestamp,
+            "rsi":               analytics.get("rsi", 50.0),
             "compression_ratio": analytics.get("compression_ratio", 1.0),
-            "cycle_zone": analytics.get("cycle_zone", "UNKNOWN"),
-            "is_spike": analytics.get("is_current_spike", False)
+            "cycle_zone":        analytics.get("cycle_zone", "UNKNOWN"),
+            "is_spike":          analytics.get("is_current_spike", False),
         }
-
-        # Maintain history in memory
-        if not hasattr(self, "live_history"):
-            self.live_history = []
-
         self.live_history.append(record)
         if len(self.live_history) > 150:
             self.live_history.pop(0)
 
-        # Maintain 1M candles in memory
-        if not hasattr(self, "live_candles"):
-            self.live_candles = []
-
-        minute_timestamp = (timestamp // 60) * 60
-
-        if not self.live_candles or self.live_candles[-1]["timestamp"] < minute_timestamp:
+        # Rolling 1M candles
+        minute_ts = (timestamp // 60) * 60
+        if not self.live_candles or self.live_candles[-1]["timestamp"] < minute_ts:
             prev_rsi = self.live_candles[-1]["rsi_close"] if self.live_candles else 50.0
-            rsi_val = analytics.get("rsi", prev_rsi)
-            new_candle = {
-                "timestamp": minute_timestamp,
-                "open": price,
-                "high": price,
-                "low": price,
-                "close": price,
-                "rsi_open": prev_rsi,
-                "rsi_high": max(prev_rsi, rsi_val),
-                "rsi_low": min(prev_rsi, rsi_val),
-                "rsi_close": rsi_val,
+            rsi_val  = analytics.get("rsi", prev_rsi)
+            self.live_candles.append({
+                "timestamp": minute_ts,
+                "open": price, "high": price,
+                "low":  price, "close": price,
+                "rsi_open": prev_rsi, "rsi_high": max(prev_rsi, rsi_val),
+                "rsi_low":  min(prev_rsi, rsi_val), "rsi_close": rsi_val,
                 "is_spike": analytics.get("is_current_spike", False),
-                "cycle_zone": analytics.get("cycle_zone", "UNKNOWN")
-            }
-            self.live_candles.append(new_candle)
+                "cycle_zone": analytics.get("cycle_zone", "UNKNOWN"),
+            })
         else:
-            last_candle = self.live_candles[-1]
-            last_candle["high"] = max(last_candle["high"], price)
-            last_candle["low"] = min(last_candle["low"], price)
-            last_candle["close"] = price
-            
-            rsi_val = analytics.get("rsi", last_candle["rsi_close"])
-            last_candle["rsi_high"] = max(last_candle["rsi_high"], rsi_val)
-            last_candle["rsi_low"] = min(last_candle["rsi_low"], rsi_val)
-            last_candle["rsi_close"] = rsi_val
-            
+            c = self.live_candles[-1]
+            c["high"]  = max(c["high"], price)
+            c["low"]   = min(c["low"],  price)
+            c["close"] = price
+            rsi_val    = analytics.get("rsi", c["rsi_close"])
+            c["rsi_high"]  = max(c["rsi_high"],  rsi_val)
+            c["rsi_low"]   = min(c["rsi_low"],   rsi_val)
+            c["rsi_close"] = rsi_val
             if analytics.get("is_current_spike", False):
-                last_candle["is_spike"] = True
+                c["is_spike"] = True
             if analytics.get("cycle_zone"):
-                last_candle["cycle_zone"] = analytics["cycle_zone"]
+                c["cycle_zone"] = analytics["cycle_zone"]
 
-        # Limit to 150 candles (spanning 2.5 hours)
         if len(self.live_candles) > 150:
             self.live_candles.pop(0)
 
-        # Get active trade details
-        active_trade_info = None
-        if self.trader.active_trade:
-            t = self.trader.active_trade
-            direction = t["direction"]
-            entry = t["entry_price"]
-            lot = t["lot_size"]
-            pnl = (price - entry) * lot if direction == "BUY" else (entry - price) * lot
-            active_trade_info = {
-                "trade_id": t["trade_id"],
-                "direction": direction,
-                "entry_price": entry,
-                "lot_size": lot,
-                "ticks_held": t["ticks_held"],
-                "pnl": round(pnl, 2)
+    def start(self):
+        self.stream = DerivDataStream(
+            symbol=self.symbol,
+            on_tick_callback=self.handle_tick,
+            on_candles_callback=self.handle_candles,
+        )
+        self.stream.start()
+
+    def stop(self):
+        if self.stream:
+            self.stream.stop()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MULTI-SYMBOL BOT ORCHESTRATOR
+# ─────────────────────────────────────────────────────────────────────────────
+
+class SyntheticTradingBot:
+    def __init__(self, symbols: list[str]):
+        self.symbols      = [s.upper() for s in symbols]
+        self.logger       = TradeLogger()
+        self.risk_manager = RiskManager(self.logger)
+        self.trader       = PaperTrader(self.logger, self.risk_manager)
+        self.workers      = {
+            sym: SymbolWorker(sym, self.trader, self.logger)
+            for sym in self.symbols
+        }
+        self._stop_event = threading.Event()
+
+    def print_banner(self):
+        sym_str  = " | ".join(self.symbols)
+        mode_str = f"MULTI ({len(self.symbols)} symbols)" if len(self.symbols) > 1 else "SINGLE"
+        banner = f"""
+============================================================
+   SYNTHISPIKE AI AGENT v4 — {mode_str}
+   Monitoring: {sym_str}
+============================================================
+  Mode     : {'LIVE DERIV' if getattr(config, 'FORCE_LIVE_WS', True) else 'SIMULATION'}
+  Balance  : ${self.trader.balance:.2f}
+  Risk     : Max Daily Loss ${config.MAX_DAILY_LOSS:.0f} | Drawdown {config.MAX_DRAWDOWN_PCT*100:.0f}%
+  SL / TP  : {config.STOP_LOSS_POINTS} pts / {config.TAKE_PROFIT_POINTS} pts
+  Exit     : {config.BOOM_EXIT_TICKS} ticks (HOT: {getattr(config,'HOT_ZONE_EXIT_TICKS',30)})
+  Trailing : {'ON' if getattr(config,'TRAILING_STOP_ACTIVE',True) else 'OFF'} at {getattr(config,'TRAILING_STOP_TRIGGER_PCT',0.40)*100:.0f}% of TP
+============================================================
+[SYSTEM] Starting workers. Press Ctrl+C to stop...
+"""
+        print(banner)
+
+    def _save_loop(self):
+        """Background thread: writes live_ticks.json every second."""
+        while not self._stop_event.is_set():
+            self._save_all_ticks()
+            time.sleep(1.0)
+
+    def _save_all_ticks(self):
+        per_symbol: dict = {}
+        for sym, worker in self.workers.items():
+            a = worker.latest_analytics
+            per_symbol[sym] = {
+                "ticks":               worker.live_history[-150:],
+                "candles":             worker.live_candles[-150:],
+                "cycle_zone":          a.get("cycle_zone", "UNKNOWN"),
+                "ticks_since_spike":   a.get("ticks_since_spike", 0),
+                "cycle_position":      a.get("cycle_position", 0.0),
+                "spike_probability_pct": a.get("spike_probability_pct", 0.0),
+                "confidence_score":    a.get("confidence_score", 0.0),
+                "entry_score":         a.get("entry_score", 0.0),
+                "last_price":          worker.latest_price,
+                "is_fallback":         worker.is_fallback,
+                "tick_count":          worker.tick_counter,
             }
 
-        # Build payload
-        is_fallback = True
-        if self.stream is not None:
-            is_fallback = self.stream.use_fallback
+        # Symbol with the highest spike probability
+        best_sym = max(
+            per_symbol.keys(),
+            key=lambda s: per_symbol[s]["spike_probability_pct"]
+        )
+
+        # Active trade details
+        active_trade_info = None
+        if self.trader.active_trade:
+            t     = self.trader.active_trade
+            sym   = t["symbol"]
+            price = self.workers[sym].latest_price if sym in self.workers else t["entry_price"]
+            lot   = t["lot_size"]
+            pnl   = (price - t["entry_price"]) * lot \
+                    if t["direction"] == "BUY" \
+                    else (t["entry_price"] - price) * lot
+            active_trade_info = {
+                "trade_id":    t["trade_id"],
+                "symbol":      sym,
+                "direction":   t["direction"],
+                "entry_price": t["entry_price"],
+                "lot_size":    lot,
+                "ticks_held":  t["ticks_held"],
+                "pnl":         round(pnl, 2),
+                "entry_zone":  t.get("entry_zone", "?"),
+            }
+
+        primary = self.symbols[0]
+        ps      = per_symbol[primary]
 
         payload = {
-            "symbol": self.symbol,
-            "ticks": self.live_history,
-            "candles": self.live_candles,
-            "active_trade": active_trade_info,
-            "balance": round(self.trader.balance, 2),
-            "is_fallback": is_fallback,
-            # Live cycle analytics for the dashboard gauge
-            "cycle_zone": analytics.get("cycle_zone", "UNKNOWN"),
-            "ticks_since_spike": analytics.get("ticks_since_spike", 0),
-            "cycle_position": analytics.get("cycle_position", 0.0),
-            "spike_probability_pct": round(analytics.get("spike_probability", 0.0) * 100, 1),
-            "confidence_score": round(analytics.get("entry_score", 0.0) * 100, 1),
+            # Multi-symbol fields
+            "mode":              "multi" if len(self.symbols) > 1 else "single",
+            "symbols":           self.symbols,
+            "per_symbol":        per_symbol,
+            "best_signal_symbol": best_sym,
+            # Shared account
+            "active_trade":      active_trade_info,
+            "balance":           round(self.trader.balance, 2),
+            # Legacy single-symbol fields (backward compat)
+            "symbol":            primary,
+            "ticks":             ps["ticks"],
+            "candles":           ps["candles"],
+            "is_fallback":       any(w.is_fallback for w in self.workers.values()),
+            "cycle_zone":        ps["cycle_zone"],
+            "ticks_since_spike": ps["ticks_since_spike"],
+            "cycle_position":    ps["cycle_position"],
+            "spike_probability_pct": ps["spike_probability_pct"],
+            "confidence_score":  ps["confidence_score"],
         }
 
-        # Write to JSON file
         try:
             os.makedirs(config.LOG_DIR, exist_ok=True)
             ticks_path = os.path.join(config.LOG_DIR, "live_ticks.json")
@@ -210,45 +302,17 @@ class SyntheticTradingBot:
         except Exception:
             pass
 
-    def handle_candles(self, raw_candles):
-        """Callback to seed/set the initial list of 1M historical candles."""
-        import random
-        self.live_candles = []
-        for c in raw_candles:
-            timestamp = c["epoch"]
-            rsi = 50.0
-            if len(self.live_candles) > 0:
-                prev_c = self.live_candles[-1]
-                rsi = prev_c["rsi_close"] + random.uniform(-2, 2)
-                rsi = max(15.0, min(85.0, rsi))
-            
-            # Simple check if there's a big price change to classify a historical spike
-            price_change = (c["high"] - c["open"]) if "BOOM" in self.symbol else (c["open"] - c["low"])
-            is_spike = price_change > 12.0
-            
-            candle = {
-                "timestamp": timestamp,
-                "open": c["open"],
-                "high": c["high"],
-                "low": c["low"],
-                "close": c["close"],
-                "rsi_open": rsi,
-                "rsi_high": rsi,
-                "rsi_low": rsi,
-                "rsi_close": rsi,
-                "is_spike": is_spike,
-                "cycle_zone": "RECOVERY" if is_spike else "NORMAL"
-            }
-            self.live_candles.append(candle)
-
     def run(self):
         self.print_banner()
-        self.stream = DerivDataStream(
-            symbol=self.symbol,
-            on_tick_callback=self.handle_tick,
-            on_candles_callback=self.handle_candles
-        )
-        self.stream.start()
+
+        # Start save thread
+        save_thread = threading.Thread(target=self._save_loop, daemon=True)
+        save_thread.start()
+
+        # Start all symbol workers
+        for sym, worker in self.workers.items():
+            print(f"[SYSTEM] Starting stream for {sym}...")
+            worker.start()
 
         try:
             while True:
@@ -257,26 +321,37 @@ class SyntheticTradingBot:
             self.shutdown()
 
     def shutdown(self):
-        print("\n[SYSTEM] Shutting down safely...")
-        if self.stream:
-            self.stream.stop()
+        print("\n[SYSTEM] Shutting down all streams safely...")
+        self._stop_event.set()
+        for sym, worker in self.workers.items():
+            worker.stop()
+            print(f"[SYSTEM] {sym} stream stopped.")
 
-        # Print final session summary
         wr  = self.trader.successful_trades / self.trader.total_trades \
               if self.trader.total_trades > 0 else 0.0
         pnl = self.trader.balance - config.INITIAL_BALANCE
         print(
             f"\n[SESSION SUMMARY]\n"
+            f"  Symbols      : {' | '.join(self.symbols)}\n"
             f"  Trades       : {self.trader.total_trades}\n"
             f"  Win Rate     : {wr*100:.1f}%\n"
             f"  Net PnL      : ${pnl:+.2f}\n"
             f"  Final Balance: ${self.trader.balance:.2f}\n"
-            f"  Spikes seen  : {self.strategy.total_spikes_observed}\n"
         )
         sys.exit(0)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  ENTRY POINT
+# ─────────────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
-    symbol = sys.argv[1] if len(sys.argv) > 1 else config.ACTIVE_SYMBOL
-    bot = SyntheticTradingBot(symbol)
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if args:
+        symbols = args
+    else:
+        symbols = getattr(config, "ACTIVE_SYMBOLS", [config.ACTIVE_SYMBOL])
+
+    print(f"[SYSTEM] Launching bot for: {' + '.join(symbols)}")
+    bot = SyntheticTradingBot(symbols)
     bot.run()

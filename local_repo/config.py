@@ -1,7 +1,17 @@
 # config.py
 """
-Synthetic Indices Trading Agent Configration Module
-Contains general settings, risk controls, and technical parameters for Crash / Boom markets.
+Synthetic Indices Trading Agent — Configuration Module v4
+Strategy v4 changes (2026-06-08):
+  - Exit ticks reduced 120 → 40 (short spike-hunter window)
+  - Stop loss 2.5 → 1.2 pts (inside natural noise to stop drift bleed)
+  - Take profit 20 → 8.0 pts (spike partial-capture, achievable)
+  - ENTRY_SCORE_THRESHOLD 0.42 → 0.57 (less overtrading)
+  - POST_TRADE_COOLDOWN_TICKS 60 → 120 (let drift settle after loss)
+  - TRADE_AGAINST_SPIKES False (unvalidated; adds noise)
+  - OVERDUE_SCORE_GATE 0.30 (replaces unconditional OVERDUE trigger)
+  - TRAILING_STOP_ACTIVE True (lock breakeven at 40% of TP)
+  - HOT_ZONE_EXIT_TICKS 30 (short timeout for HOT/OVERDUE entries)
+  - BUILDING zone lot scale removed (only HOT+ gets cycle scaling)
 """
 
 import os
@@ -14,95 +24,94 @@ FORCE_LIVE_WS = True
 # --- TRADING SYMBOLS ---
 # BOOM1000 = avg 1 upward spike per 1000 ticks (~16 min)
 # CRASH1000 = avg 1 downward spike per 1000 ticks
-# BOOM500 = avg 1 upward spike per 500 ticks (~8 min)
-# CRASH500 = avg 1 downward spike per 500 ticks
-ACTIVE_SYMBOL = "CRASH500"
+# BOOM500   = avg 1 upward spike per 500 ticks  (~8 min)
+# CRASH500  = avg 1 downward spike per 500 ticks
+ACTIVE_SYMBOL  = "BOOM1000"
+ACTIVE_SYMBOLS = ["BOOM1000"]   # multi-symbol mode: add up to 4 symbols
 
 # --- SIMULATION & PAPER TRADING ---
 INITIAL_BALANCE = 50.0
-MIN_LOT_SIZE = 0.10
-DEFAULT_LOT_SIZE = 0.2
+MIN_LOT_SIZE    = 0.10
+DEFAULT_LOT_SIZE = 0.20
 
 # --- MARTINGALE ---
-MARTINGALE_ACTIVE = True
-MARTINGALE_FACTOR = 1.4
-MARTINGALE_MAX_MULTIPLIER = 5
+MARTINGALE_ACTIVE          = False   # disabled by default (high risk)
+MARTINGALE_FACTOR          = 1.4
+MARTINGALE_MAX_MULTIPLIER  = 5.0
 
-# --- TRADE AGAINST SPIKES ---
-TRADE_AGAINST_SPIKES = True
-ANTI_SPIKE_LOT_SIZE = 0.1      # low risk flat size for drift capture
+# --- TRADE AGAINST SPIKES (counter-drift) ---
+# Disabled — unvalidated on real data; adds noise trades.
+TRADE_AGAINST_SPIKES = False
+ANTI_SPIKE_LOT_SIZE  = 0.10
 
-# --- BOT EXIT PARAMETERS (TICK-BASED EXIT) ---
-BOOM_EXIT_TICKS = 120
-CRASH_EXIT_TICKS = 120
+# --- BOT EXIT PARAMETERS ---
+# v4: Short windows force spike-timed entries or quick small losses.
+# HOT/OVERDUE entries use HOT_ZONE_EXIT_TICKS (even shorter).
+BOOM_EXIT_TICKS       = 40    # was 120
+CRASH_EXIT_TICKS      = 40    # was 120
+HOT_ZONE_EXIT_TICKS   = 30    # max hold when entry was in HOT or OVERDUE zone
 
-# --- STOP LOSS / TAKE PROFIT (in price points) ---
-STOP_LOSS_POINTS = 2.5
-TAKE_PROFIT_POINTS = 20
+# --- STOP LOSS / TAKE PROFIT ---
+# v4: Tight SL keeps losses small. TP at 8pts is achievable on a real spike.
+# Negative drift over 40 ticks ≈ 1.4 pts, so SL=1.2 will still fire on true reversals.
+STOP_LOSS_POINTS    = 1.2    # was 2.5
+TAKE_PROFIT_POINTS  = 8.0    # was 20.0
+
+# --- TRAILING STOP ---
+# Activates when PnL reaches TRAILING_STOP_TRIGGER_PCT × TP.
+# Once triggered, trade exits if PnL drops back to breakeven (≤0).
+TRAILING_STOP_ACTIVE      = True
+TRAILING_STOP_TRIGGER_PCT = 0.40   # lock breakeven at 40% of TP = $3.2 gain
 
 # --- BASELINE SPIKE STRATEGY HYPERPARAMETERS ---
-TICK_WINDOW_SIZE = 50
+TICK_WINDOW_SIZE              = 50
 VOLATILITY_COMPRESSION_WINDOW = 20
-VOLATILITY_BOLLINGER_DEV = 1.5
-SPIKE_THRESHOLD_FACTOR = 2.5
+VOLATILITY_BOLLINGER_DEV      = 1.5
+SPIKE_THRESHOLD_FACTOR        = 2.5
 
 # --- ENTRY FILTER THRESHOLDS ---
-RSI_OVERSOLD = 28
-RSI_OVERBOUGHT = 58
-SQUEEZE_THRESHOLD = 0.75
-ZSCORE_ENTRY = 0.8
+RSI_OVERSOLD        = 28
+RSI_OVERBOUGHT      = 58
+SQUEEZE_THRESHOLD   = 0.75
+ZSCORE_ENTRY        = 0.8
 
-# --- PROBABILITY SCORING MODEL (v3 strategy) ---
-# Minimum composite spike-probability score required to open a trade.
-# Score is a weighted sum of cycle_p + compression_p + energy_p (all 0–1).
-# RECOVERY zone always blocks; OVERDUE zone always triggers (ignores threshold).
-ENTRY_SCORE_THRESHOLD = 0.42
+# --- PROBABILITY SCORING MODEL (v4) ---
+# Score threshold raised to 0.57 to reduce overtrading.
+# RECOVERY zone: always blocks.
+# OVERDUE zone: fires only if score >= OVERDUE_SCORE_GATE (not unconditional).
+# This fixes the memoryless fallacy — a tick at position 1200 is no more
+# likely to spike than one at position 400 (geometric distribution).
+ENTRY_SCORE_THRESHOLD = 0.57    # was 0.42
+OVERDUE_SCORE_GATE    = 0.30    # replaces unconditional OVERDUE trigger
 
 # Component weights — must sum to 1.0.
-# Cycle timing gets dominant weight: it is the ONLY component with proven
-# statistical edge (geometric distribution of inter-spike intervals).
-# Unproven components (compression, energy) kept small so they can never
-# override cycle timing on their own.
-WEIGHT_CYCLE       = 0.6   # geometric spike probability — proven predictor
-WEIGHT_COMPRESSION = 0.2   # volatility squeeze       — unproven (audit p=0.169)
-WEIGHT_ENERGY      = 0.2   # down/up tick count       — unproven (audit p=0.635)
+WEIGHT_CYCLE       = 0.60
+WEIGHT_COMPRESSION = 0.20
+WEIGHT_ENERGY      = 0.20
 
 # --- SPIKE CYCLE COUNTER ---
-# BOOM1000 fires ~1 spike per 1000 ticks. We track how many ticks have
-# passed since the last observed spike and use that to scale entry
-# aggressiveness — entering more boldly when a spike is statistically overdue.
-#
-# Zones (as a fraction of SPIKE_CYCLE_LENGTH):
-#   RECOVERY  0.00 – CYCLE_EARLY_ZONE   No entries. Spike just happened;
-#                                        probability has reset to near zero.
-#   BUILDING  CYCLE_EARLY_ZONE – CYCLE_HOT_ZONE   Normal signals apply.
-#   HOT       CYCLE_HOT_ZONE – 1.00    Spike is approaching statistically.
-#                                        Normal signals + relaxed thresholds.
-#   OVERDUE   > 1.00                    Past expected cycle point. Enter
-#                                        even without other confirmations.
-SPIKE_CYCLE_LENGTH = 1000       # ticks between spikes (matches index name)
-CYCLE_EARLY_ZONE = 0.15  # recovery zone ends at 25% of cycle
-CYCLE_HOT_ZONE = 0.6  # hot zone begins at 70% of cycle
+SPIKE_CYCLE_LENGTH = 1000
+CYCLE_EARLY_ZONE   = 0.15    # RECOVERY ends at 15%
+CYCLE_HOT_ZONE     = 0.60    # HOT begins at 60%
 
-# Lot size scaling when a spike is overdue (CYCLE_LOT_SCALING must be True).
-# At cycle_multiplier = 2.0 (furthest overdue) lot size = DEFAULT_LOT_SIZE * 2.0
-CYCLE_LOT_SCALING = True
-CYCLE_MAX_LOT_SCALE = 2.5
+# Lot scaling: BUILDING zone uses flat DEFAULT_LOT_SIZE.
+# HOT/OVERDUE zones apply cycle scaling (entering near expected spike).
+CYCLE_LOT_SCALING   = True
+CYCLE_MAX_LOT_SCALE = 2.0    # was 2.5 — capped lower for capital safety
 
 # --- POST-TRADE COOLDOWN ---
-# Minimum ticks to wait after any trade closes before opening a new one.
-# Prevents chasing the same downtrend immediately after a timeout loss.
-POST_TRADE_COOLDOWN_TICKS = 60
+# v4: 120 ticks gives price time to recover from drift before next entry.
+POST_TRADE_COOLDOWN_TICKS = 120   # was 60
 
 # --- RISK MANAGEMENT LIMITS ---
-MAX_DAILY_LOSS = 15
-MAX_TRADES_PER_SESSION = 50
-COOLDOWN_AFTER_LOSS_STREAK = 5
-COOLDOWN_MINUTES = 3
-MAX_DRAWDOWN_PCT = 0.3
+MAX_DAILY_LOSS              = 15.0
+MAX_TRADES_PER_SESSION      = 50
+COOLDOWN_AFTER_LOSS_STREAK  = 5
+COOLDOWN_MINUTES            = 3
+MAX_DRAWDOWN_PCT            = 0.30
 
-# --- FILE PATHS FOR LOGGING ---
-LOG_DIR = "logs"
-TRADE_LOG_CSV = os.path.join(LOG_DIR, "trade_log.csv")
-TRADE_LOG_JSON = os.path.join(LOG_DIR, "trade_log.json")
+# --- FILE PATHS ---
+LOG_DIR          = "logs"
+TRADE_LOG_CSV    = os.path.join(LOG_DIR, "trade_log.csv")
+TRADE_LOG_JSON   = os.path.join(LOG_DIR, "trade_log.json")
 BOT_METRICS_JSON = os.path.join(LOG_DIR, "bot_metrics.json")

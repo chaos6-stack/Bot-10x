@@ -82,6 +82,22 @@ export default function App() {
   const [uploadStatus,     setUploadStatus]      = useState<"idle"|"uploading"|"done"|"error">("idle");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── MULTI-SYMBOL ──
+  const ALL_SYMBOLS = ["BOOM1000","CRASH1000","BOOM500","CRASH500"];
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(["BOOM1000"]);
+  const [botActiveSymbols, setBotActiveSymbols] = useState<string[]>([]);
+
+  const toggleSymbol = (sym: string) => {
+    setSelectedSymbols(prev => {
+      if (prev.includes(sym)) {
+        if (prev.length === 1) return prev; // always keep at least one
+        return prev.filter(s => s !== sym);
+      }
+      if (prev.length >= 4) return prev; // max 4
+      return [...prev, sym];
+    });
+  };
+
   // ── MISC ──
   const [copiedCurl,    setCopiedCurl]    = useState(false);
   const [githubRepoUrl, setGithubRepoUrl] = useState("https://github.com/Username/deriv-spike-bot-brain.git");
@@ -132,6 +148,7 @@ export default function App() {
     try {
       const data = await fetch("/api/bot/status").then(r => r.json());
       setBotStatus(data.status); setBotOutput(data.output);
+      if (data.symbols) setBotActiveSymbols(data.symbols);
     } catch { }
   };
 
@@ -331,10 +348,10 @@ export default function App() {
 
   const startLiveBot = async () => {
     setTerminalType("live-bot");
-    setBotOutput("Pre-allocating stream headers...");
+    setBotOutput(`Starting streams for: ${selectedSymbols.join(" + ")}...`);
     await fetch("/api/bot/start", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ symbol: config?.ACTIVE_SYMBOL }),
+      body: JSON.stringify({ symbols: selectedSymbols }),
     });
     checkBotStatus();
   };
@@ -473,7 +490,7 @@ export default function App() {
               SynthiSpike AI Agent
             </h1>
             <p className="text-[10px] text-slate-500 font-mono tracking-wider">
-              DERIV SPIKE BRAIN v3.0 &bull; PAPER TRADING
+              DERIV SPIKE BRAIN v4.0 &bull; PAPER TRADING
             </p>
           </div>
         </div>
@@ -583,6 +600,49 @@ export default function App() {
                       {botStatus === "running" && (
                         <p className="text-[9px] text-amber-400 font-mono bg-amber-950/20 px-2 py-1 rounded border border-amber-900/40">
                           ⚡ Bot is running — switching symbol will auto-restart the stream.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* ── Multi-symbol monitor ── */}
+                    <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-900/80 space-y-2">
+                      <div className="flex items-center justify-between mb-1">
+                        <h3 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Multi-Symbol Mode</h3>
+                        <span className="text-[9px] font-mono text-slate-500">{selectedSymbols.length}/4 selected</span>
+                      </div>
+                      <p className="text-[9px] text-slate-500 font-mono leading-relaxed">
+                        Select 1–4 indices to monitor simultaneously. Bot opens trades on whichever has the best signal.
+                      </p>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {ALL_SYMBOLS.map(sym => {
+                          const on = selectedSymbols.includes(sym);
+                          const isBoom = sym.startsWith("BOOM");
+                          return (
+                            <button key={sym} onClick={() => toggleSymbol(sym)}
+                              className={`py-2 px-1.5 rounded-lg border font-mono text-center transition-all flex items-center gap-1.5 ${
+                                on
+                                  ? isBoom
+                                    ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/50 ring-1 ring-emerald-500/30"
+                                    : "bg-rose-500/10 text-rose-300 border-rose-500/50 ring-1 ring-rose-500/30"
+                                  : "bg-slate-950/60 text-slate-600 border-slate-800 hover:border-slate-700 hover:text-slate-400"
+                              }`}>
+                              <span className={`w-2 h-2 rounded-full flex-shrink-0 ${on ? (isBoom ? "bg-emerald-400" : "bg-rose-400") : "bg-slate-700"}`} />
+                              <div className="flex flex-col items-start">
+                                <span className="text-[9px] font-black uppercase leading-none">{sym.replace("1000","1K").replace("500","500")}</span>
+                                <span className="text-[8px] opacity-60">{sym.includes("1000") ? "~1/16m" : "~1/8m"}</span>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {botStatus === "running" && botActiveSymbols.length > 0 && (
+                        <div className="text-[9px] font-mono text-emerald-400 bg-emerald-950/20 px-2 py-1 rounded border border-emerald-900/40">
+                          ● Active: {botActiveSymbols.join(" + ")}
+                        </div>
+                      )}
+                      {botStatus !== "running" && selectedSymbols.length > 1 && (
+                        <p className="text-[9px] text-sky-400 font-mono">
+                          ℹ Start the bot to monitor {selectedSymbols.length} symbols simultaneously.
                         </p>
                       )}
                     </div>
@@ -790,7 +850,7 @@ export default function App() {
                         { zone: "RECOVERY", desc: "Just after spike — no entries",    color: "bg-rose-500" },
                         { zone: "BUILDING", desc: "Building up — normal signals",      color: "bg-sky-500" },
                         { zone: "HOT",      desc: "Spike is near — relaxed thresholds",color: "bg-amber-500" },
-                        { zone: "OVERDUE",  desc: "Past due — unconditional entry",    color: "bg-purple-500" },
+                        { zone: "OVERDUE",  desc: "Past due — score-gated at 0.30",   color: "bg-purple-500" },
                       ].map(z => (
                         <div key={z.zone} className="flex items-center gap-2">
                           <div className={`w-2.5 h-2.5 rounded-full ${z.color}`} />
@@ -906,6 +966,89 @@ export default function App() {
 
         {/* ═══ CENTRE COLUMN (col-span-6) ═══ */}
         <section className="xl:col-span-6 flex flex-col gap-4">
+
+          {/* ── MULTI-SYMBOL STATUS BAR (shown when 2+ symbols active) ── */}
+          {(() => {
+            const perSym = (liveData as any).per_symbol as Record<string, any> | undefined;
+            const mode   = (liveData as any).mode as string | undefined;
+            const best   = (liveData as any).best_signal_symbol as string | undefined;
+            if (!perSym || !mode || mode !== "multi") return null;
+            const syms = Object.keys(perSym);
+            return (
+              <div className="bg-slate-950 border border-slate-900 rounded-xl p-3">
+                <div className="flex items-center gap-2 mb-2">
+                  <Activity className="h-3.5 w-3.5 text-teal-400" />
+                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+                    Multi-Symbol Monitor — {syms.length} Active Streams
+                  </span>
+                </div>
+                <div className={`grid gap-2 ${syms.length === 2 ? "grid-cols-2" : "grid-cols-4"}`}>
+                  {syms.map(sym => {
+                    const d     = perSym[sym];
+                    const zone  = d.cycle_zone as string || "UNKNOWN";
+                    const prob  = d.spike_probability_pct as number || 0;
+                    const cycP  = ((d.cycle_position as number) || 0) * 100;
+                    const price = d.last_price as number || 0;
+                    const isFb  = d.is_fallback as boolean;
+                    const isBest = sym === best;
+                    const isBoom = sym.startsWith("BOOM");
+                    const zoneColors: Record<string,string> = {
+                      RECOVERY: "border-rose-800/60 bg-rose-950/20",
+                      BUILDING: "border-sky-800/60 bg-sky-950/20",
+                      HOT:      "border-amber-700/60 bg-amber-950/20",
+                      OVERDUE:  "border-purple-700/60 bg-purple-950/20",
+                    };
+                    const zoneTxtColors: Record<string,string> = {
+                      RECOVERY: "text-rose-400",
+                      BUILDING: "text-sky-400",
+                      HOT:      "text-amber-400",
+                      OVERDUE:  "text-purple-400",
+                    };
+                    return (
+                      <div key={sym}
+                        className={`relative rounded-lg border p-2.5 transition-all ${zoneColors[zone] || "border-slate-800 bg-slate-900/20"} ${isBest ? "ring-1 ring-teal-500/50" : ""}`}>
+                        {isBest && (
+                          <div className="absolute -top-2 left-2 text-[8px] font-mono font-black bg-teal-600 text-white px-1.5 py-0.5 rounded-full uppercase tracking-wider">
+                            Best Signal
+                          </div>
+                        )}
+                        <div className="flex justify-between items-start mb-1.5">
+                          <div>
+                            <div className="text-[9px] font-black font-mono uppercase text-slate-200 leading-none">{sym}</div>
+                            {isFb && <span className="text-[7px] font-mono text-amber-500">SIM</span>}
+                          </div>
+                          <span className={`text-[8px] font-mono font-bold px-1 py-0.5 rounded ${zoneTxtColors[zone] || "text-slate-400"}`}>
+                            {zone}
+                          </span>
+                        </div>
+                        <div className="flex justify-between items-center mb-1">
+                          <span className={`text-[10px] font-mono font-bold ${isBoom ? "text-emerald-400" : "text-rose-400"}`}>
+                            {price > 0 ? price.toFixed(2) : "—"}
+                          </span>
+                          <span className="text-[9px] font-mono font-bold text-white">
+                            {prob.toFixed(1)}%
+                          </span>
+                        </div>
+                        {/* Cycle progress mini-bar */}
+                        <div className="h-1 w-full bg-slate-800 rounded-full overflow-hidden">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              zone === "RECOVERY" ? "bg-rose-500" :
+                              zone === "BUILDING" ? "bg-sky-500" :
+                              zone === "HOT"      ? "bg-amber-500" :
+                              "bg-purple-500"
+                            }`}
+                            style={{ width: `${Math.min(cycP, 100)}%` }}
+                          />
+                        </div>
+                        <div className="text-[7px] font-mono text-slate-600 mt-0.5 text-right">{cycP.toFixed(0)}% cycle</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── SYMBOL SWITCHER + BOT/OPT CONTROLS ── */}
           <div className="bg-slate-950 border border-slate-900 rounded-xl p-4 space-y-3">

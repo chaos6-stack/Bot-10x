@@ -24,5 +24,44 @@
         "exit_reason": "Timeout (120 ticks)",
         "ticks_held": 120,
         "spike_detected": false
+    },
+    {
+        "timestamp": "2026-06-08 18:39:55",
+        "trade_id": "86d14336",
+        "symbol": "CRASH500",
+        "direction": "SELL",
+        "entry_price": 2998.818,
+        "exit_price": 2999.46,
+        "pnl": -0.25,
+        "balance": 49.36,
+        "exit_reason": "Timeout (120 ticks)",
+        "ticks_held": 120,
+        "spike_detected": false
+    },
+    {
+        "timestamp": "2026-06-08 18:42:55",
+        "trade_id": "49ff8b4e",
+        "symbol": "CRASH500",
+        "direction": "SELL",
+        "entry_price": 2999.808,
+        "exit_price": 3000.577,
+        "pnl": -0.42,
+        "balance": 48.93,
+        "exit_reason": "Timeout (120 ticks)",
+        "ticks_held": 120,
+        "spike_detected": false
+    },
+    {
+        "timestamp": "2026-06-08 18:45:55",
+        "trade_id": "bb304f79",
+        "symbol": "CRASH500",
+        "direction": "SELL",
+        "entry_price": 3000.9,
+        "exit_price": 3001.676,
+        "pnl": -0.6,
+        "balance": 48.34,
+        "exit_reason": "Timeout (120 ticks)",
+        "ticks_held": 120,
+        "spike_detected": false
     }
 ]
