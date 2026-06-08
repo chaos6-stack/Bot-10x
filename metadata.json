@@ -1,0 +1,6 @@
+{
+  "name": "Synth Index Spike Agent Dashboard",
+  "description": "An AI-Assisted paper trading bot and optimizer for synthetic indices like BOOM1000 and CRASH1000.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
