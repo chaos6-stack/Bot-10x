@@ -1,0 +1,2 @@
+- [SynthiSpike stack & key conventions](synthispike-stack.md) — Python bot in local_repo/, server.ts is Express+Vite, live_ticks.json is the state bridge.
+- [Deriv WebSocket auth pattern](deriv-ws-auth.md) — Token auth via authorize message; never silent simulation fallback; NixOS pip needs --break-system-packages.

@@ -27,6 +27,8 @@ export interface StrategyConfig {
   COOLDOWN_MINUTES: number;
   MAX_DRAWDOWN_PCT: number;
   DEFAULT_LOT_SIZE: number;
+  MIN_LOT_SIZE: number;
+  INITIAL_BALANCE: number;
   MARTINGALE_ACTIVE: boolean;
   MARTINGALE_FACTOR: number;
   MARTINGALE_MAX_MULTIPLIER: number;
@@ -46,6 +48,8 @@ export interface TradeRecord {
   exit_reason: string;
   ticks_held: number;
   spike_detected: boolean;
+  lot_size?: number;
+  cycle_zone?: string;
 }
 
 export interface SessionMetrics {

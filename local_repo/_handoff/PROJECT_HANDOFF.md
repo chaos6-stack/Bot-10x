@@ -568,5 +568,44 @@ The Android app calls these Python scripts as its logic layer. When a "brain upd
 
 ---
 
+## CHANGE 011 — Full Dashboard Overhaul (2026-06-08)
+
+**19 UI/functionality fixes applied across server.ts, App.tsx, main.py, data_stream.py.**
+
+### Backend Changes (`server.ts`)
+- `multer` installed & wired: `POST /api/files/upload` — multipart file upload, allowlist-gated.
+- `GET /api/files/read/:filename` — serve any brain file as plain text for in-browser editing.
+- `POST /api/files/write/:filename` — overwrite brain file with `.bak` backup created first.
+- `POST /api/bot/restart` — kills existing bot, waits 800ms, respawns with new symbol. All Python child processes now inherit full `process.env` (including `DERIV_API_TOKEN`).
+- Added all missing config keys: `MIN_LOT_SIZE`, `INITIAL_BALANCE`, `MARTINGALE_ACTIVE`, `MARTINGALE_FACTOR`, `MARTINGALE_MAX_MULTIPLIER`, `TRADE_AGAINST_SPIKES`, `ANTI_SPIKE_LOT_SIZE`, `FORCE_LIVE_WS`.
+- pip install command changed to `--break-system-packages` to work on NixOS.
+
+### Bot Changes (`main.py`, `data_stream.py`)
+- `live_ticks.json` payload now includes: `cycle_zone`, `ticks_since_spike`, `cycle_position`, `spike_probability_pct`, `confidence_score`.
+- `data_stream.py` rewritten: token auth via `authorize` WebSocket message, account info logged on connect, hard-gate on simulation (only when `FORCE_LIVE_WS=False`).
+
+### Frontend Changes (`src/App.tsx`, `src/types.ts`)
+1. **Real Deriv tick data** — `DERIV_API_TOKEN` passed to all Python procs; simulation banner shown when `is_fallback=true`.
+2. **Symbol switch → bot restart** — selecting a symbol while bot is running auto-calls `/api/bot/restart`.
+3. **Brain file editor** — Edit/Save/Cancel in-browser textarea per brain file; config.py reload after save.
+4. **File upload** — Upload button sends multipart POST; file list refreshes on success.
+5. **Metrics fix** — `metrics.bot_metrics` and `metrics.optimization_report` correctly destructured.
+6. **Balance header** — Live balance shown in header bar, coloured green/red vs $50 baseline.
+7. **Martingale tab** — Dedicated tab with ACTIVE toggle, FACTOR, MAX_MULTIPLIER inputs + danger calc.
+8. **Counter-spike trading** — TRADE_AGAINST_SPIKES toggle + ANTI_SPIKE_LOT_SIZE input in Strategy tab.
+9. **MIN_LOT_SIZE + INITIAL_BALANCE** — Added to General tab.
+10. **FORCE_LIVE_WS toggle** — Live/Simulation selector in General tab with warning text.
+11. **Cycle zone progress bar** — Coloured bar (rose/sky/amber/purple), zone boundaries from config, tick counter.
+12. **Spike probability grid** — Cycle P%, Confidence, Cycle Position shown when bot is live.
+13. **Weight normalization warning** — Red alert + disabled save button if weights ≠ 1.0.
+14. **Optimizer results panel** — "Last Opt Run" right-panel tab showing all 8 backtester metrics + applied params.
+15. **Stop bot confirmation** — Modal dialog before killing the bot process.
+16. **Trade history lot_size column** — Added "Lots" column to trade table.
+17. **Terminal zone highlights** — `[OVERDUE]`=purple, `[HOT]`=amber, `[RECOVERY]`=rose, `[BUILDING]`=sky coloured lines.
+18. **GitHub git commands** — Correct git init/push snippet with editable repo URL input.
+19. **Trade open/close toast notifications** — Pop-up toasts on trade open (direction, entry) and close (P&L, win/loss).
+
+---
+
 *End of handoff document. Update this file whenever a significant change is made.*
 

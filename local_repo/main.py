@@ -192,7 +192,13 @@ class SyntheticTradingBot:
             "candles": self.live_candles,
             "active_trade": active_trade_info,
             "balance": round(self.trader.balance, 2),
-            "is_fallback": is_fallback
+            "is_fallback": is_fallback,
+            # Live cycle analytics for the dashboard gauge
+            "cycle_zone": analytics.get("cycle_zone", "UNKNOWN"),
+            "ticks_since_spike": analytics.get("ticks_since_spike", 0),
+            "cycle_position": analytics.get("cycle_position", 0.0),
+            "spike_probability_pct": round(analytics.get("spike_probability", 0.0) * 100, 1),
+            "confidence_score": round(analytics.get("entry_score", 0.0) * 100, 1),
         }
 
         # Write to JSON file
