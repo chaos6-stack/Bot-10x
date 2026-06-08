@@ -16,21 +16,21 @@ FORCE_LIVE_WS = True
 # CRASH1000 = avg 1 downward spike per 1000 ticks
 # BOOM500 = avg 1 upward spike per 500 ticks (~8 min)
 # CRASH500 = avg 1 downward spike per 500 ticks
-ACTIVE_SYMBOL = "BOOM1000"
+ACTIVE_SYMBOL = "CRASH500"
 
 # --- SIMULATION & PAPER TRADING ---
 INITIAL_BALANCE = 50.0
 MIN_LOT_SIZE = 0.10
-DEFAULT_LOT_SIZE = 0.20
+DEFAULT_LOT_SIZE = 0.2
 
 # --- MARTINGALE ---
 MARTINGALE_ACTIVE = True
 MARTINGALE_FACTOR = 1.4
-MARTINGALE_MAX_MULTIPLIER = 5.0
+MARTINGALE_MAX_MULTIPLIER = 5
 
 # --- TRADE AGAINST SPIKES ---
 TRADE_AGAINST_SPIKES = True
-ANTI_SPIKE_LOT_SIZE = 0.10      # low risk flat size for drift capture
+ANTI_SPIKE_LOT_SIZE = 0.1      # low risk flat size for drift capture
 
 # --- BOT EXIT PARAMETERS (TICK-BASED EXIT) ---
 BOOM_EXIT_TICKS = 120
@@ -38,7 +38,7 @@ CRASH_EXIT_TICKS = 120
 
 # --- STOP LOSS / TAKE PROFIT (in price points) ---
 STOP_LOSS_POINTS = 2.5
-TAKE_PROFIT_POINTS = 20.0
+TAKE_PROFIT_POINTS = 20
 
 # --- BASELINE SPIKE STRATEGY HYPERPARAMETERS ---
 TICK_WINDOW_SIZE = 50
@@ -63,9 +63,9 @@ ENTRY_SCORE_THRESHOLD = 0.42
 # statistical edge (geometric distribution of inter-spike intervals).
 # Unproven components (compression, energy) kept small so they can never
 # override cycle timing on their own.
-WEIGHT_CYCLE       = 0.60   # geometric spike probability — proven predictor
-WEIGHT_COMPRESSION = 0.20   # volatility squeeze       — unproven (audit p=0.169)
-WEIGHT_ENERGY      = 0.20   # down/up tick count       — unproven (audit p=0.635)
+WEIGHT_CYCLE       = 0.6   # geometric spike probability — proven predictor
+WEIGHT_COMPRESSION = 0.2   # volatility squeeze       — unproven (audit p=0.169)
+WEIGHT_ENERGY      = 0.2   # down/up tick count       — unproven (audit p=0.635)
 
 # --- SPIKE CYCLE COUNTER ---
 # BOOM1000 fires ~1 spike per 1000 ticks. We track how many ticks have
@@ -95,11 +95,11 @@ CYCLE_MAX_LOT_SCALE = 2.5
 POST_TRADE_COOLDOWN_TICKS = 60
 
 # --- RISK MANAGEMENT LIMITS ---
-MAX_DAILY_LOSS = 15.0
+MAX_DAILY_LOSS = 15
 MAX_TRADES_PER_SESSION = 50
 COOLDOWN_AFTER_LOSS_STREAK = 5
 COOLDOWN_MINUTES = 3
-MAX_DRAWDOWN_PCT = 0.30
+MAX_DRAWDOWN_PCT = 0.3
 
 # --- FILE PATHS FOR LOGGING ---
 LOG_DIR = "logs"
