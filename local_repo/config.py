@@ -26,7 +26,7 @@ FORCE_LIVE_WS = True
 # CRASH1000 = avg 1 downward spike per 1000 ticks
 # BOOM500   = avg 1 upward spike per 500 ticks  (~8 min)
 # CRASH500  = avg 1 downward spike per 500 ticks
-ACTIVE_SYMBOL  = "BOOM1000"
+ACTIVE_SYMBOL  = "CRASH500"
 ACTIVE_SYMBOLS = ["BOOM1000"]   # multi-symbol mode: add up to 4 symbols
 
 # --- SIMULATION & PAPER TRADING ---
