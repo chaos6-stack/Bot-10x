@@ -56,8 +56,8 @@ HOT_ZONE_EXIT_TICKS   = 30    # max hold when entry was in HOT or OVERDUE zone
 # range. BOOM1000 drifts ~0.035 pts/tick × 40 ticks = ~1.4 pts drift, so 1.2 fired on
 # drift alone before spikes arrived. User held positions past bot SL and all 3 hit 15-20
 # pt spike wins. 2.0 absorbs drift over the hold window; cuts genuine reversals only.
-STOP_LOSS_POINTS    = 2.0    # field-tested: widened from 1.2 (too tight)
-TAKE_PROFIT_POINTS  = 8.0    # spike partial-capture, achievable on real BOOM spikes
+STOP_LOSS_POINTS    = 2    # field-tested: widened from 1.2 (too tight)
+TAKE_PROFIT_POINTS  = 8    # spike partial-capture, achievable on real BOOM spikes
 
 # --- TRAILING STOP ---
 # Activates when PnL reaches TRAILING_STOP_TRIGGER_PCT × TP.

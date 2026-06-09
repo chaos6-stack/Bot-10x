@@ -4,11 +4,12 @@ import {
   DollarSign, Terminal, Activity, Download, AlertTriangle,
   History, FileCode, CheckCircle, XCircle, Copy, Github,
   Upload, Edit3, Save, RotateCcw, Zap, ShieldAlert, Target,
-  BarChart2, ChevronRight, AlertCircle,
+  BarChart2, ChevronRight, AlertCircle, Bell, BellOff,
 } from "lucide-react";
 import { StrategyConfig, TradeRecord } from "./types";
 import LiveChart from "./components/LiveChart";
 import ProbabilityChart from "./components/ProbabilityChart";
+import { useAudioAlert } from "./hooks/useAudioAlert";
 
 // ─── Zone colour helper ────────────────────────────────────────────────────
 function zoneColor(zone: string) {
@@ -99,6 +100,14 @@ export default function App() {
     });
   };
 
+  // ── AUDIO ALERTS ──
+  const [alertsEnabled, setAlertsEnabled] = useState(true);
+  const audio = useAudioAlert();
+  // Keep the hook's internal ref in sync with React state
+  useEffect(() => { audio.setEnabled(alertsEnabled); }, [alertsEnabled, audio]);
+  // Edge-detection: track previous probability per symbol to detect crossings
+  const prevProbRef = useRef<Record<string, number>>({});
+
   // ── MISC ──
   const [copiedCurl,    setCopiedCurl]    = useState(false);
   const [githubRepoUrl, setGithubRepoUrl] = useState("https://github.com/Username/deriv-spike-bot-brain.git");
@@ -169,13 +178,14 @@ export default function App() {
     const activeTrade = liveData.active_trade;
     const prevId = prevActiveTradeIdRef.current;
     if (activeTrade && (!prevId || activeTrade.trade_id !== prevId)) {
-      addToast(`🚀 OPENED ${activeTrade.direction} ${liveData.symbol} @ ${activeTrade.entry_price.toFixed(3)}`, "info");
+      addToast(`🚀 OPENED ${activeTrade.direction} ${activeTrade.symbol ?? liveData.symbol} @ ${activeTrade.entry_price.toFixed(3)}`, "info");
+      if (alertsEnabled) audio.alertTradeOpened(activeTrade.direction);
       prevActiveTradeIdRef.current = activeTrade.trade_id;
     } else if (!activeTrade && prevId) {
       fetchTrades(); fetchMetrics();
       prevActiveTradeIdRef.current = null;
     }
-  }, [liveData, addToast]);
+  }, [liveData, addToast, alertsEnabled, audio]);
 
   useEffect(() => {
     if (trades.length > 0 && prevTradesCountRef.current > 0 && trades.length > prevTradesCountRef.current) {
@@ -186,10 +196,43 @@ export default function App() {
           `🏁 CLOSED ${t.direction} ${t.symbol} | ${win ? "+" : ""}$${t.pnl.toFixed(2)} (${win ? "WIN 🟢" : "LOSS 🔴"}) | ${t.exit_reason || "timeout"}`,
           win ? "success" : "warning"
         );
+        if (alertsEnabled) audio.alertTradeClosed(win);
       }
     }
     prevTradesCountRef.current = trades.length;
-  }, [trades, addToast]);
+  }, [trades, addToast, alertsEnabled, audio]);
+
+  // ── Threshold-crossing alert (edge-triggered per symbol) ──────────────────
+  useEffect(() => {
+    if (!alertsEnabled || botStatus !== "running") return;
+    const threshold = config?.ENTRY_SCORE_THRESHOLD
+      ? (config.ENTRY_SCORE_THRESHOLD as number) * 100
+      : 57;
+
+    // Build current probabilities — multi or single
+    const perSym = (liveData as any).per_symbol as Record<string, any> | undefined;
+    const currentProbs: Record<string, number> = {};
+
+    if (perSym) {
+      for (const [sym, data] of Object.entries(perSym)) {
+        currentProbs[sym] = (data as any).spike_probability_pct ?? 0;
+      }
+    } else {
+      const sym = liveData.symbol;
+      if (sym) currentProbs[sym] = (liveData as any).spike_probability_pct ?? 0;
+    }
+
+    // Fire alert when any symbol crosses the threshold from below
+    for (const [sym, prob] of Object.entries(currentProbs)) {
+      const prev = prevProbRef.current[sym] ?? 0;
+      if (prev < threshold && prob >= threshold) {
+        // Crossed UP through threshold
+        audio.alertThresholdCrossed();
+        addToast(`🔔 ${sym} probability hit ${prob.toFixed(1)}% — entry threshold reached!`, "warning");
+      }
+      prevProbRef.current[sym] = prob;
+    }
+  }, [liveData, alertsEnabled, botStatus, config, audio, addToast]);
 
   useEffect(() => {
     if (terminalType === "optimizer") optTerminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -530,6 +573,24 @@ export default function App() {
               <span className="text-xs font-mono text-amber-400 font-bold">SIMULATION — NOT LIVE</span>
             </div>
           )}
+
+          {/* Alert toggle */}
+          <button
+            onClick={() => {
+              const next = !alertsEnabled;
+              setAlertsEnabled(next);
+              if (next) audio.alertTest();
+            }}
+            title={alertsEnabled ? "Alerts ON — click to mute" : "Alerts MUTED — click to enable"}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono font-bold transition-all active:scale-95 ${
+              alertsEnabled
+                ? "bg-emerald-950/60 border-emerald-700/60 text-emerald-400 hover:bg-emerald-900/60"
+                : "bg-slate-900/60 border-slate-700 text-slate-500 hover:text-slate-300"
+            }`}>
+            {alertsEnabled
+              ? <><Bell className="h-3.5 w-3.5" /> Alerts ON</>
+              : <><BellOff className="h-3.5 w-3.5" /> Muted</>}
+          </button>
         </div>
       </header>
 

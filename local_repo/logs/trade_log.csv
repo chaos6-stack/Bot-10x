@@ -1,5 +1,1 @@
-2026-06-09 07:48:15,6963ca80,BOOM1000,BUY,13894.165,13893.863,-0.24,49.36,"Timeout (30 ticks, HOT entry)",30,False
-2026-06-09 07:50:45,89f76978,BOOM1000,BUY,13892.038,13891.648,-0.38,48.98,"Timeout (30 ticks, HOT entry)",30,False
-2026-06-09 07:53:15,e06e151c,BOOM1000,BUY,13890.09,13889.603,-0.57,48.41,"Timeout (30 ticks, HOT entry)",30,False
-2026-06-09 08:02:18,c472aa96,BOOM1000,BUY,13917.727,13917.155,-0.4,48.01,"Timeout (40 ticks, normal)",40,False
-2026-06-09 08:05:48,907eeee6,BOOM1000,BUY,13914.495,13914.063,-0.32,47.69,"Timeout (30 ticks, HOT entry)",30,False
+timestamp,trade_id,symbol,direction,entry_price,exit_price,pnl,balance,exit_reason,ticks_held,spike_detected
