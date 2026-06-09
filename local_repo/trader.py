@@ -138,7 +138,9 @@ class PaperTrader:
         spike_cap   = False
 
         # ── Exit 1: Stop-loss ─────────────────────────────────────────────────
-        if pnl <= -config.STOP_LOSS_POINTS * lot:
+        sl_limit = -config.STOP_LOSS_POINTS * lot
+        if pnl <= sl_limit:
+            pnl = sl_limit          # clamp: simulate guaranteed broker SL fill
             should_exit = True
             exit_reason = f"Stop-loss ({pnl:.3f})"
 
@@ -150,6 +152,7 @@ class PaperTrader:
 
         # ── Exit 3: Take-profit ───────────────────────────────────────────────
         elif pnl >= config.TAKE_PROFIT_POINTS * lot:
+            pnl = config.TAKE_PROFIT_POINTS * lot   # clamp: simulate guaranteed broker TP fill
             should_exit = True
             exit_reason = f"Take-profit ({pnl:.3f})"
 
