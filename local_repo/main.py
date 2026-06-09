@@ -129,12 +129,15 @@ class SymbolWorker:
 
     def _record_tick(self, price: float, timestamp: int, analytics: dict):
         record = {
-            "price":             price,
-            "timestamp":         timestamp,
-            "rsi":               analytics.get("rsi", 50.0),
-            "compression_ratio": analytics.get("compression_ratio", 1.0),
-            "cycle_zone":        analytics.get("cycle_zone", "UNKNOWN"),
-            "is_spike":          analytics.get("is_current_spike", False),
+            "price":                price,
+            "timestamp":            timestamp,
+            "rsi":                  analytics.get("rsi", 50.0),
+            "compression_ratio":    analytics.get("compression_ratio", 1.0),
+            "cycle_zone":           analytics.get("cycle_zone", "UNKNOWN"),
+            "cycle_position":       analytics.get("cycle_position", 0.0),
+            "spike_probability_pct": analytics.get("spike_probability_pct", 0.0),
+            "confidence_score":     analytics.get("confidence_score", 0.0),
+            "is_spike":             analytics.get("is_current_spike", False),
         }
         self.live_history.append(record)
         if len(self.live_history) > 150:

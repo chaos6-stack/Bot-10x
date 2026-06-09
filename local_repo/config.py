@@ -30,19 +30,19 @@ ACTIVE_SYMBOL  = "BOOM1000"
 ACTIVE_SYMBOLS = ["BOOM1000"]   # multi-symbol mode: add up to 4 symbols
 
 # --- SIMULATION & PAPER TRADING ---
-INITIAL_BALANCE = 50.0
-MIN_LOT_SIZE    = 0.10
-DEFAULT_LOT_SIZE = 0.20
+INITIAL_BALANCE = 50
+MIN_LOT_SIZE    = 0.5
+DEFAULT_LOT_SIZE = 0.7
 
 # --- MARTINGALE ---
 MARTINGALE_ACTIVE          = False   # disabled by default (high risk)
 MARTINGALE_FACTOR          = 1.4
-MARTINGALE_MAX_MULTIPLIER  = 5.0
+MARTINGALE_MAX_MULTIPLIER  = 5
 
 # --- TRADE AGAINST SPIKES (counter-drift) ---
 # Disabled — unvalidated on real data; adds noise trades.
 TRADE_AGAINST_SPIKES = False
-ANTI_SPIKE_LOT_SIZE  = 0.10
+ANTI_SPIKE_LOT_SIZE  = 0.1
 
 # --- BOT EXIT PARAMETERS ---
 # v4: Short windows force spike-timed entries or quick small losses.
@@ -52,10 +52,12 @@ CRASH_EXIT_TICKS      = 40    # was 120
 HOT_ZONE_EXIT_TICKS   = 30    # max hold when entry was in HOT or OVERDUE zone
 
 # --- STOP LOSS / TAKE PROFIT ---
-# v4: Tight SL keeps losses small. TP at 8pts is achievable on a real spike.
-# Negative drift over 40 ticks ≈ 1.4 pts, so SL=1.2 will still fire on true reversals.
-STOP_LOSS_POINTS    = 1.2    # was 2.5
-TAKE_PROFIT_POINTS  = 8.0    # was 20.0
+# v4.1: SL widened 1.2 → 2.0 after field test showed 1.2 was inside the natural drift
+# range. BOOM1000 drifts ~0.035 pts/tick × 40 ticks = ~1.4 pts drift, so 1.2 fired on
+# drift alone before spikes arrived. User held positions past bot SL and all 3 hit 15-20
+# pt spike wins. 2.0 absorbs drift over the hold window; cuts genuine reversals only.
+STOP_LOSS_POINTS    = 2.0    # field-tested: widened from 1.2 (too tight)
+TAKE_PROFIT_POINTS  = 8.0    # spike partial-capture, achievable on real BOOM spikes
 
 # --- TRAILING STOP ---
 # Activates when PnL reaches TRAILING_STOP_TRIGGER_PCT × TP.
@@ -85,30 +87,30 @@ ENTRY_SCORE_THRESHOLD = 0.57    # was 0.42
 OVERDUE_SCORE_GATE    = 0.30    # replaces unconditional OVERDUE trigger
 
 # Component weights — must sum to 1.0.
-WEIGHT_CYCLE       = 0.60
-WEIGHT_COMPRESSION = 0.20
-WEIGHT_ENERGY      = 0.20
+WEIGHT_CYCLE       = 0.6
+WEIGHT_COMPRESSION = 0.2
+WEIGHT_ENERGY      = 0.2
 
 # --- SPIKE CYCLE COUNTER ---
 SPIKE_CYCLE_LENGTH = 1000
 CYCLE_EARLY_ZONE   = 0.15    # RECOVERY ends at 15%
-CYCLE_HOT_ZONE     = 0.60    # HOT begins at 60%
+CYCLE_HOT_ZONE     = 0.6    # HOT begins at 60%
 
 # Lot scaling: BUILDING zone uses flat DEFAULT_LOT_SIZE.
 # HOT/OVERDUE zones apply cycle scaling (entering near expected spike).
 CYCLE_LOT_SCALING   = True
-CYCLE_MAX_LOT_SCALE = 2.0    # was 2.5 — capped lower for capital safety
+CYCLE_MAX_LOT_SCALE = 2    # was 2.5 — capped lower for capital safety
 
 # --- POST-TRADE COOLDOWN ---
 # v4: 120 ticks gives price time to recover from drift before next entry.
 POST_TRADE_COOLDOWN_TICKS = 120   # was 60
 
 # --- RISK MANAGEMENT LIMITS ---
-MAX_DAILY_LOSS              = 15.0
+MAX_DAILY_LOSS              = 15
 MAX_TRADES_PER_SESSION      = 50
 COOLDOWN_AFTER_LOSS_STREAK  = 5
 COOLDOWN_MINUTES            = 3
-MAX_DRAWDOWN_PCT            = 0.30
+MAX_DRAWDOWN_PCT            = 0.3
 
 # --- FILE PATHS ---
 LOG_DIR          = "logs"

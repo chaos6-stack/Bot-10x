@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { StrategyConfig, TradeRecord } from "./types";
 import LiveChart from "./components/LiveChart";
+import ProbabilityChart from "./components/ProbabilityChart";
 
 // ─── Zone colour helper ────────────────────────────────────────────────────
 function zoneColor(zone: string) {
@@ -1193,6 +1194,83 @@ export default function App() {
             stopLossPoints={config?.STOP_LOSS_POINTS}
             takeProfitPoints={config?.TAKE_PROFIT_POINTS}
           />
+
+          {/* ── LIVE PROBABILITY CHART ── */}
+          {(() => {
+            const perSym   = (liveData as any).per_symbol as Record<string, any> | undefined;
+            const mode     = (liveData as any).mode as "single" | "multi" | undefined;
+            const rawTicks = liveData.ticks ?? [];
+            const hasProbData = mode === "multi"
+              ? perSym && Object.values(perSym).some((s: any) => s.ticks?.some((t: any) => t.spike_probability_pct > 0))
+              : rawTicks.some((t: any) => (t.spike_probability_pct ?? 0) > 0);
+            if (!hasProbData && botStatus !== "running") return null;
+            return (
+              <div className="bg-slate-950 border border-slate-900 rounded-xl overflow-hidden">
+                {/* Header */}
+                <div className="px-3 pt-2.5 pb-1.5 border-b border-slate-900 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <BarChart2 className="h-3.5 w-3.5 text-indigo-400" />
+                    <span className="text-[10px] font-mono font-bold text-slate-300 uppercase tracking-wider">Live Spike Probability</span>
+                  </div>
+                  {/* Symbol legend badges */}
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {mode === "multi" && perSym
+                      ? Object.entries(perSym).map(([sym, data]: [string, any]) => {
+                          const colors: Record<string,string> = {
+                            BOOM1000:  "border-emerald-500/50 bg-emerald-500/10 text-emerald-300",
+                            CRASH1000: "border-rose-500/50 bg-rose-500/10 text-rose-300",
+                            BOOM500:   "border-amber-500/50 bg-amber-500/10 text-amber-300",
+                            CRASH500:  "border-sky-500/50 bg-sky-500/10 text-sky-300",
+                          };
+                          const dots: Record<string,string> = {
+                            BOOM1000: "bg-emerald-400", CRASH1000: "bg-rose-400",
+                            BOOM500:  "bg-amber-400",   CRASH500:  "bg-sky-400",
+                          };
+                          const prob = data.spike_probability_pct ?? 0;
+                          return (
+                            <span key={sym} className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border font-mono text-[8px] font-bold ${colors[sym] ?? "border-slate-700 bg-slate-800 text-slate-400"}`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${dots[sym] ?? "bg-slate-500"}`} />
+                              {sym.replace("1000","1K")} {prob.toFixed(1)}%
+                            </span>
+                          );
+                        })
+                      : (
+                        <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full border border-emerald-500/50 bg-emerald-500/10 font-mono text-[8px] font-bold text-emerald-300">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          {liveData.symbol} {latestSpikePct.toFixed(1)}%
+                        </span>
+                      )
+                    }
+                    {/* Threshold legend */}
+                    <span className="flex items-center gap-1 font-mono text-[8px] text-amber-500/70 ml-1">
+                      <span className="inline-block w-3 border-t border-dashed border-amber-500/70" /> entry {config?.ENTRY_SCORE_THRESHOLD ? Math.round((config.ENTRY_SCORE_THRESHOLD as number) * 100) : 57}%
+                    </span>
+                    <span className="flex items-center gap-1 font-mono text-[8px] text-purple-500/70">
+                      <span className="inline-block w-3 border-t border-dashed border-purple-500/70" /> gate 30%
+                    </span>
+                  </div>
+                </div>
+                {/* Chart */}
+                <div className="px-2 pb-2 pt-1">
+                  <ProbabilityChart
+                    ticks={rawTicks}
+                    symbol={liveData.symbol}
+                    perSymbol={perSym}
+                    mode={mode === "multi" ? "multi" : "single"}
+                    entryThresholdPct={config?.ENTRY_SCORE_THRESHOLD ? Math.round((config.ENTRY_SCORE_THRESHOLD as number) * 100) : 57}
+                    overdueGatePct={30}
+                    height={110}
+                  />
+                </div>
+                {/* Footer hint */}
+                <div className="px-3 pb-1.5 flex gap-4 text-[8px] font-mono text-slate-600">
+                  <span>Vertical marks = detected spikes</span>
+                  <span className="text-amber-600">— — amber = entry threshold</span>
+                  <span className="text-purple-700">— — purple = overdue gate</span>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── TERMINALS ── */}
           <div className="flex-1 bg-slate-950 border border-slate-900 rounded-xl overflow-hidden flex flex-col min-h-[320px] max-h-[500px]">
