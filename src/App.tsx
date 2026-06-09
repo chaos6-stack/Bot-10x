@@ -735,6 +735,62 @@ export default function App() {
                       )}
                     </div>
 
+                    {/* Trade Mode */}
+                    <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-900/80 space-y-2">
+                      <h3 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Trade Mode</h3>
+                      <p className="text-[9px] text-slate-500 leading-relaxed">
+                        <span className="text-cyan-400 font-bold">With Spikes</span> — pre-spike entries only (BUY BOOM / SELL CRASH).<br />
+                        <span className="text-violet-400 font-bold">Against Spikes</span> — counter-drift after spike only (SELL BOOM / BUY CRASH).<br />
+                        <span className="text-amber-400 font-bold">Both</span> — takes both types with separate TP / SL / hold rules.
+                      </p>
+                      <div className="flex rounded-lg overflow-hidden border border-slate-800 text-[10px] font-mono font-bold">
+                        {(["WITH_SPIKES", "BOTH", "AGAINST_SPIKES"] as const).map((mode, i) => {
+                          const labels: Record<string, string> = {
+                            WITH_SPIKES:    "↑ With",
+                            BOTH:           "↕ Both",
+                            AGAINST_SPIKES: "↓ Against",
+                          };
+                          const active = (config.TRADE_MODE ?? "WITH_SPIKES") === mode;
+                          const colours: Record<string, string> = {
+                            WITH_SPIKES:    active ? "bg-cyan-700 text-white"    : "bg-slate-900 text-slate-500 hover:text-cyan-400",
+                            BOTH:           active ? "bg-amber-700 text-white"   : "bg-slate-900 text-slate-500 hover:text-amber-400",
+                            AGAINST_SPIKES: active ? "bg-violet-700 text-white"  : "bg-slate-900 text-slate-500 hover:text-violet-400",
+                          };
+                          return (
+                            <button key={mode}
+                              onClick={() => handleInputChange("TRADE_MODE", mode)}
+                              className={`flex-1 py-1.5 transition-all ${colours[mode]} ${i === 1 ? "border-x border-slate-800" : ""}`}>
+                              {labels[mode]}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {/* Counter-spike params — only shown when relevant */}
+                      {(config.TRADE_MODE === "AGAINST_SPIKES" || config.TRADE_MODE === "BOTH") && (
+                        <div className="pt-1 space-y-2 border-t border-slate-800/60">
+                          <p className="text-[9px] text-slate-500 font-mono uppercase tracking-wide">Counter-spike parameters</p>
+                          {([
+                            ["COUNTER_SPIKE_TP_POINTS",  "Drift TP (pts)",   0.5, 20, 0.5],
+                            ["COUNTER_SPIKE_SL_POINTS",  "Drift SL (pts)",   0.5, 10, 0.5],
+                            ["COUNTER_SPIKE_HOLD_TICKS", "Drift Hold (ticks)", 3, 60,  1],
+                            ["ANTI_SPIKE_LOT_SIZE",      "Drift Lot Size",   0.01, 5, 0.01],
+                          ] as [keyof StrategyConfig, string, number, number, number][]).map(([k, label, min, max, step]) => (
+                            <label key={k} className="block">
+                              <div className="flex justify-between text-[10px] font-mono mb-1">
+                                <span className="text-slate-400">{label}</span>
+                                <span className="text-violet-400 font-bold">{config[k] as any}</span>
+                              </div>
+                              <input type="number" min={min} max={max} step={step}
+                                value={config[k] as any}
+                                onChange={e => handleInputChange(k, k === "COUNTER_SPIKE_HOLD_TICKS"
+                                  ? parseInt(e.target.value) : parseFloat(e.target.value))}
+                                className="w-full bg-slate-900 border border-slate-800 text-xs py-1 px-2 rounded font-mono text-violet-300 focus:outline-none focus:border-violet-600" />
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
                     {/* Risk */}
                     <div className="bg-slate-900/40 p-3 rounded-lg border border-slate-900/80 space-y-3">
                       <h3 className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Risk Management</h3>

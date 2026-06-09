@@ -39,10 +39,23 @@ MARTINGALE_ACTIVE          = False   # disabled by default (high risk)
 MARTINGALE_FACTOR          = 1.4
 MARTINGALE_MAX_MULTIPLIER  = 5
 
+# --- TRADE MODE ---
+# Controls which trade types the bot takes:
+#   "WITH_SPIKES"    — only pre-spike entries (BUY BOOM / SELL CRASH)
+#   "AGAINST_SPIKES" — only counter-spike drift trades (SELL BOOM / BUY CRASH after spike)
+#   "BOTH"           — takes both types (different lot/TP/SL rules per type)
+TRADE_MODE = "WITH_SPIKES"
+
 # --- TRADE AGAINST SPIKES (counter-drift) ---
-# Disabled — unvalidated on real data; adds noise trades.
+# Legacy flag — kept for backward compatibility. Superseded by TRADE_MODE.
 TRADE_AGAINST_SPIKES = False
 ANTI_SPIKE_LOT_SIZE  = 0.1
+
+# --- COUNTER-SPIKE SPECIFIC PARAMETERS ---
+# Drift after a spike is sharp but very short. Different rules apply.
+COUNTER_SPIKE_TP_POINTS  = 3.0   # small target — drift fades fast
+COUNTER_SPIKE_SL_POINTS  = 1.0   # tight cut — if drift isn't immediate, it won't come
+COUNTER_SPIKE_HOLD_TICKS = 15    # max 15 ticks in a drift trade
 
 # --- BOT EXIT PARAMETERS ---
 # v4: Short windows force spike-timed entries or quick small losses.

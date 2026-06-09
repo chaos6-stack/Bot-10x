@@ -125,8 +125,10 @@ class PaperTrader:
         if pnl > trade["peak_pnl"]:
             trade["peak_pnl"] = pnl
 
-        # ── Timeout: HOT entries use short window, others use normal ──────────
-        if trade.get("is_hot_entry", False):
+        # ── Timeout: counter trades use short drift window; HOT/OVERDUE use HOT window ──
+        if trade.get("is_counter_spike", False):
+            max_held = getattr(config, "COUNTER_SPIKE_HOLD_TICKS", 15)
+        elif trade.get("is_hot_entry", False):
             max_held = getattr(config, "HOT_ZONE_EXIT_TICKS", 30)
         else:
             sym = trade.get("symbol", config.ACTIVE_SYMBOL)
@@ -137,28 +139,37 @@ class PaperTrader:
         exit_reason = "Tick timeout"
         spike_cap   = False
 
+        is_counter = trade.get("is_counter_spike", False)
+
+        # ── Per-trade-type TP / SL constants ──────────────────────────────────
+        if is_counter:
+            sl_pts = getattr(config, "COUNTER_SPIKE_SL_POINTS", 1.0)
+            tp_pts = getattr(config, "COUNTER_SPIKE_TP_POINTS", 3.0)
+        else:
+            sl_pts = config.STOP_LOSS_POINTS
+            tp_pts = config.TAKE_PROFIT_POINTS
+
         # ── Exit 1: Stop-loss ─────────────────────────────────────────────────
-        sl_limit = -config.STOP_LOSS_POINTS * lot
+        sl_limit = -sl_pts * lot
         if pnl <= sl_limit:
             pnl = sl_limit          # clamp: simulate guaranteed broker SL fill
             should_exit = True
             exit_reason = f"Stop-loss ({pnl:.3f})"
 
         # ── Exit 2: Counter-spike zone ended ──────────────────────────────────
-        elif trade.get("is_counter_spike", False) and \
-                analytics.get("cycle_zone", "RECOVERY") != "RECOVERY":
+        elif is_counter and analytics.get("cycle_zone", "RECOVERY") != "RECOVERY":
             should_exit = True
             exit_reason = "RECOVERY zone ended (drift captured)"
 
         # ── Exit 3: Take-profit ───────────────────────────────────────────────
-        elif pnl >= config.TAKE_PROFIT_POINTS * lot:
-            pnl = config.TAKE_PROFIT_POINTS * lot   # clamp: simulate guaranteed broker TP fill
+        elif pnl >= tp_pts * lot:
+            pnl = tp_pts * lot      # clamp: simulate guaranteed broker TP fill
             should_exit = True
             exit_reason = f"Take-profit ({pnl:.3f})"
 
-        # ── Exit 4: Trailing stop (breakeven lock) ────────────────────────────
-        elif getattr(config, "TRAILING_STOP_ACTIVE", True):
-            trigger = config.TAKE_PROFIT_POINTS * lot * getattr(config, "TRAILING_STOP_TRIGGER_PCT", 0.40)
+        # ── Exit 4: Trailing stop (breakeven lock — with-spike trades only) ───
+        elif not is_counter and getattr(config, "TRAILING_STOP_ACTIVE", True):
+            trigger = tp_pts * lot * getattr(config, "TRAILING_STOP_TRIGGER_PCT", 0.40)
             if not trade["breakeven_locked"] and pnl >= trigger:
                 trade["breakeven_locked"] = True
                 self.logger.log(

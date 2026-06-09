@@ -196,9 +196,13 @@ class SpikeStrategy:
         features["entry_score"]           = score
         features["score_breakdown"]       = breakdown
 
+        trade_mode = getattr(config, "TRADE_MODE", "WITH_SPIKES")
+        want_counter = trade_mode in ("AGAINST_SPIKES", "BOTH")
+        want_with    = trade_mode in ("WITH_SPIKES",    "BOTH")
+
         # ── RECOVERY ZONE ─────────────────────────────────────────────────────
         if cycle_zone == "RECOVERY":
-            if getattr(config, "TRADE_AGAINST_SPIKES", False):
+            if want_counter:
                 rsi_val = features.get("rsi", 50.0)
                 slope   = features.get("ema_slope", 0.0)
                 safe    = True
@@ -206,14 +210,17 @@ class SpikeStrategy:
                 if is_squeezed:
                     safe = False; reason = "squeeze detected"
                 elif self.is_boom:
-                    if slope > 0.0:     safe = False; reason = f"upward slope ({slope:.4f})"
+                    if slope > 0.0:      safe = False; reason = f"upward slope ({slope:.4f})"
                     elif rsi_val < 42.0: safe = False; reason = f"RSI oversold ({rsi_val:.1f})"
                 elif self.is_crash:
-                    if slope < 0.0:     safe = False; reason = f"downward slope ({slope:.4f})"
+                    if slope < 0.0:      safe = False; reason = f"downward slope ({slope:.4f})"
                     elif rsi_val > 58.0: safe = False; reason = f"RSI overbought ({rsi_val:.1f})"
                 if safe:
                     features["is_counter_spike"]  = True
-                    features["decision_reason"]   = "COUNTER-SPIKE — RECOVERY zone drift trade"
+                    features["decision_reason"]   = (
+                        f"COUNTER-SPIKE — RECOVERY zone drift | "
+                        f"mode={trade_mode} | tick {self.ticks_since_last_spike}"
+                    )
                     return "SELL" if self.is_boom else "BUY", features
                 else:
                     features["is_counter_spike"] = False
@@ -222,11 +229,20 @@ class SpikeStrategy:
             else:
                 features["is_counter_spike"] = False
                 features["decision_reason"]  = (
-                    f"RECOVERY zone — {self.ticks_since_last_spike} ticks since spike"
+                    f"RECOVERY zone — {self.ticks_since_last_spike} ticks since spike "
+                    f"(counter trades OFF)"
                 )
                 return "HOLD", features
         else:
             features["is_counter_spike"] = False
+
+        # ── WITH-SPIKE modes blocked when AGAINST_SPIKES only ─────────────────
+        if not want_with:
+            features["decision_reason"] = (
+                f"WITH_SPIKE entries disabled (mode={trade_mode}) | "
+                f"Waiting for next spike to trade recovery drift."
+            )
+            return "HOLD", features
 
         # ── OVERDUE ZONE (v4: score-gated, not unconditional) ─────────────────
         if cycle_zone == "OVERDUE":

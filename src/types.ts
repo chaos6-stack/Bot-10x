@@ -32,8 +32,12 @@ export interface StrategyConfig {
   MARTINGALE_ACTIVE: boolean;
   MARTINGALE_FACTOR: number;
   MARTINGALE_MAX_MULTIPLIER: number;
+  TRADE_MODE: "WITH_SPIKES" | "AGAINST_SPIKES" | "BOTH";
   TRADE_AGAINST_SPIKES: boolean;
   ANTI_SPIKE_LOT_SIZE: number;
+  COUNTER_SPIKE_TP_POINTS: number;
+  COUNTER_SPIKE_SL_POINTS: number;
+  COUNTER_SPIKE_HOLD_TICKS: number;
   FORCE_LIVE_WS?: boolean;
 }
 
